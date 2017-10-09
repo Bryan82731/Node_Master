@@ -90,7 +90,7 @@ int main()
     
     /* Kick off application - Priority 1 */
     SimpleBLECentral_createTask();
-    
+    UART_creatTask();
     /* enable interrupts and start SYS/BIOS */
     BIOS_start();
     

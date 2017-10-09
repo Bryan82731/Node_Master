@@ -72,6 +72,9 @@
 
 #include <ti/drivers/lcd/LCDDogm1286.h>
 
+
+#include "self.h"
+
 /*********************************************************************
  * MACROS
  */
@@ -87,12 +90,13 @@
 #define SBC_RSSI_READ_EVT                     0x0008
 #define SBC_KEY_CHANGE_EVT                    0x0010
 #define SBC_STATE_CHANGE_EVT                  0x0020
+#define CHECK_MAC_EVT                         0x0001
 
 // Maximum number of scan responses
 #define DEFAULT_MAX_SCAN_RES                  8
 
 // Scan duration in ms
-#define DEFAULT_SCAN_DURATION                 4000
+#define DEFAULT_SCAN_DURATION                 200
 
 // Discovery mode (limited, general, all)
 #define DEFAULT_DISCOVERY_MODE                DEVDISC_MODE_ALL
@@ -219,7 +223,7 @@ static ICall_Semaphore sem;
 
 // Clock object used to signal timeout
 static Clock_Struct startDiscClock;
-
+static Clock_Struct MAC_check;
 // Queue object used for app messages
 static Queue_Struct appMsg;
 static Queue_Handle appMsgQueue;
@@ -281,6 +285,10 @@ static readRssi_t readRssi[MAX_NUM_BLE_CONNS];
 static void SimpleBLECentral_init(void);
 static void SimpleBLECentral_taskFxn(UArg a0, UArg a1);
 
+
+static void Uart_taskFxn(UArg a0, UArg a1);
+
+
 static void SimpleBLECentral_processGATTMsg(gattMsgEvent_t *pMsg);
 static void SimpleBLECentral_handleKeys(uint8_t shift, uint8_t keys);
 static void SimpleBLECentral_processStackMsg(ICall_Hdr *pMsg);
@@ -336,6 +344,104 @@ static gapBondCBs_t SimpleBLECentral_bondCB =
  * PUBLIC FUNCTIONS
  */
 
+void scCtrlReadyCallback(void) {
+
+} // scCtrlReadyCallback
+
+
+void scTaskAlertCallback(void) {
+
+    // Wake up the OS task
+    Semaphore_post(Semaphore_handle(&semScTaskAlert));
+
+    // Wait for an ALERT callback
+    Semaphore_pend(Semaphore_handle(&semScTaskAlert), BIOS_WAIT_FOREVER);
+
+    // Clear the ALERT interrupt source
+    scifClearAlertIntSource();
+
+    // Echo all characters currently in the RX FIFO
+    int rxFifoCount = scifUartGetRxFifoCount();
+
+    //讀出這次buffer
+    for(int a=0;a<rxFifoCount;a++)
+     rxbuf[a] =(      (char) scifUartRxGetChar()      );
+
+    // Clear the events that triggered this
+    scifUartClearEvents();
+
+    // Acknowledge the alert event
+    scifAckAlertEvents();   
+ 
+    if(rxbuf[0] == 0xAB && rxbuf[1] == 0xAB)//Slave的MAC回傳
+    {
+      memcpy(MAC_ad,rxbuf+2,6);
+      PIN_setOutputValue(hSbpPins, Board_UA2_GREEN, 1);
+      MAC_flag = 1;//確認收到MAC 關閉事件
+    }
+    
+    if((rxbuf[29]==0x22)&&(rxbuf[30]==0x22))//讀經緯 收頭尾
+    {
+      for(int i=0;i<20;i++)
+        flash[i]=rxbuf[i];
+
+      Router_lon  = (( flash[2] & 0xF0) >>4)*1000  +   (flash[2] & 0x0F)*100 +  ((flash[3] & 0xF0) >>4)*10 + (flash[3] & 0x0F);     
+      Router_lat  = (( flash[0] & 0xF0) >>4)*1000  +   ( flash[0] & 0x0F)*100 +  (( flash[1] & 0xF0) >>4)*10 + ( flash[1] & 0x0F);
+       
+      MyLight_lon = (( flash[14] & 0xF0) >>4)*1000  +   (flash[14] & 0x0F)*100 +  ((flash[15] & 0xF0) >>4)*10 + (flash[15] & 0x0F); 
+      MyLight_lat = (( flash[9] & 0xF0) >>4)*1000  +   ( flash[9] & 0x0F)*100 +  (( flash[10] & 0xF0) >>4)*10 + ( flash[10] & 0x0F);
+      
+      MyHigh = flash[16];
+      
+      MyLight_lon_H = flash[14];
+      MyLight_lon_L = flash[15];
+      
+      MyLight_lat_H = flash[9];
+      MyLight_lat_L = flash[10];  
+      
+      
+      for(int x=0;x<20;x++)
+        rxbuf[x] = 0;
+      
+      flash_flag = 1; 
+     
+
+    }
+    
+    
+    
+    
+    for(int a=0;a<rxFifoCount;a++)
+      rxbuf[a]=0;
+} // scTaskAlertCallback
+
+
+
+/*********************************************************************
+ * @fn      Uart_createTask
+ *
+ * @brief   Task creation function for the Simple BLE Peripheral.
+ *
+ * @param   None.
+ *
+ * @return  None.
+ */
+void UART_creatTask(void)
+{
+  Task_Params taskParams;
+
+  Task_Params_init(&taskParams);
+  taskParams.stack = my_UART_TaskStack;
+  taskParams.stackSize = sizeof(my_UART_TaskStack);
+  taskParams.priority = 3;
+  Task_construct(&my_UART_Task, Uart_taskFxn, &taskParams, NULL);
+
+  Semaphore_Params semParams;
+  Semaphore_Params_init(&semParams);
+  semParams.mode = Semaphore_Mode_BINARY;
+  Semaphore_construct(&semScTaskAlert, 0, &semParams);
+
+}
 /*********************************************************************
  * @fn      SimpleBLEPeripheral_createTask
  *
@@ -358,6 +464,40 @@ void SimpleBLECentral_createTask(void)
   Task_construct(&sbcTask, SimpleBLECentral_taskFxn, &taskParams, NULL);
 }
 
+/*********************************************************************
+ * @fn      Uart_taskFxn
+ *
+ * @brief   Task creation function for the Simple BLE Peripheral.
+ *
+ * @param   None.
+ *
+ * @return  None.
+ */
+static void Uart_taskFxn (UArg a0, UArg a1) {
+
+    // Initialize the Sensor Controller
+    scifOsalInit();
+    scifOsalRegisterCtrlReadyCallback(scCtrlReadyCallback);
+    scifOsalRegisterTaskAlertCallback(scTaskAlertCallback);
+    scifInit(&scifDriverSetup);
+
+    // Start the UART emulator
+    scifExecuteTasksOnceNbl(BV(SCIF_UART_EMULATOR_TASK_ID));
+
+    // Enable baud rate generation
+    scifUartSetBaudRate(57600);
+
+    // Enable RX (10 idle bit periods required before enabling start bit detection)
+    scifUartSetRxFifoThr(SCIF_UART_RX_FIFO_MAX_COUNT / 2);
+    scifUartSetRxTimeout(10 * 2);
+    scifUartSetRxEnableReqIdleCount(10 * 2);
+    scifUartRxEnable(1);
+
+    // Enable events (half full RX FIFO or 10 bit period timeout
+    scifUartSetEventMask(BV_SCIF_UART_ALERT_RX_FIFO_ABOVE_THR | BV_SCIF_UART_ALERT_RX_BYTE_TIMEOUT);
+
+
+}
 /*********************************************************************
  * @fn      SimpleBLECentral_Init
  *
@@ -393,8 +533,12 @@ static void SimpleBLECentral_init(void)
   appMsgQueue = Util_constructQueue(&appMsg);
      
   // Setup discovery delay as a one-shot timer
-  Util_constructClock(&startDiscClock, SimpleBLECentral_startDiscHandler,
-                      DEFAULT_SVC_DISCOVERY_DELAY, 0, false, 0);
+  /*Util_constructClock(&startDiscClock, SimpleBLECentral_startDiscHandler,
+                      DEFAULT_SVC_DISCOVERY_DELAY, 0, false, 0);*/
+  
+  Util_constructClock(&MAC_check, SimpleBLECentral_startDiscHandler,
+                        10, 0, false, CHECK_MAC_EVT);
+  Util_startClock(&MAC_check);
   
   //LCD和key1007
   //Board_initKeys(SimpleBLECentral_keyChangeHandler);
@@ -460,6 +604,25 @@ static void SimpleBLECentral_init(void)
   GATT_RegisterForMsgs(selfEntity);
   
   LCD_WRITE_STRING("BLE Central", LCD_PAGE0);
+  
+  
+  osal_snv_read(0x80, sizeof(int)*20, flash);
+  osal_snv_read(0x81, sizeof(int)*6, MAC_ad);
+  
+  MyHigh = flash[16];
+  
+  Router_lon  = (( flash[2] & 0xF0) >>4)*1000  +   ( flash[2] & 0x0F)*100 +  (( flash[3] & 0xF0) >>4)*10 + ( flash[3] & 0x0F);     
+  Router_lat  = (( flash[0] & 0xF0) >>4)*1000  +   ( flash[0] & 0x0F)*100 +  (( flash[1] & 0xF0) >>4)*10 + ( flash[1] & 0x0F);
+   
+  MyLight_lon = (( flash[14] & 0xF0) >>4)*1000 +   ( flash[14] & 0x0F)*100 + (( flash[15] & 0xF0) >>4)*10 + ( flash[15] & 0x0F); 
+  MyLight_lat = (( flash[9] & 0xF0) >>4)*1000  +   ( flash[9] & 0x0F)*100 +  (( flash[10] & 0xF0) >>4)*10 + ( flash[10] & 0x0F);
+  
+  MyLight_lon_H = flash[14];
+  MyLight_lon_L = flash[15];
+  
+  MyLight_lat_H = flash[9];
+  MyLight_lat_L = flash[10];    
+
 }
 
 /*********************************************************************
@@ -476,6 +639,9 @@ static void SimpleBLECentral_taskFxn(UArg a0, UArg a1)
   // Initialize application
   SimpleBLECentral_init();
   
+  GAPCentralRole_StartDiscovery(DEFAULT_DISCOVERY_MODE,
+                              DEFAULT_DISCOVERY_ACTIVE_SCAN,
+                              DEFAULT_DISCOVERY_WHITE_LIST);   //開始第一次掃描
   // Application main loop
   for (;;)
   {
@@ -521,11 +687,26 @@ static void SimpleBLECentral_taskFxn(UArg a0, UArg a1)
       }
     }
     
-    if (events & SBC_START_DISCOVERY_EVT)
-    {      
-      events &= ~SBC_START_DISCOVERY_EVT;
+    if(events & CHECK_MAC_EVT)//索取MAC event
+    {
+      events &= ~CHECK_MAC_EVT;
       
-      SimpleBLECentral_startDiscovery();
+      if(MAC_flag == 1 && flash_flag == 1)//收到了MAC & lat lon
+      {
+        char buf[]="MAC_OK";
+        scifUartTxPutChars(buf,sizeof(buf));
+        osal_snv_write(0x81, sizeof(int)*6, MAC_ad);
+        
+        osal_snv_write(0x80, sizeof(int)*20, flash);
+        flash_flag = 0;
+        MAC_flag = 0;
+      }
+      else
+        Util_startClock(&MAC_check);//重來
+      
+      
+      
+      
     }
   }
 }
@@ -661,7 +842,9 @@ static void SimpleBLECentral_processRoleEvent(gapCentralRoleEvent_t *pEvent)
 
     case GAP_DEVICE_INFO_EVENT:
       {
+
         // if filtering device discovery results based on service UUID
+        /*
         if (DEFAULT_DEV_DISC_BY_SVC_UUID == TRUE)
         {
           if (SimpleBLECentral_findSvcUuid(SIMPLEPROFILE_SERV_UUID,
@@ -671,7 +854,100 @@ static void SimpleBLECentral_processRoleEvent(gapCentralRoleEvent_t *pEvent)
             SimpleBLECentral_addDeviceInfo(pEvent->deviceInfo.addr, 
                                            pEvent->deviceInfo.addrType);
           }
+        }*/
+        
+        
+        if(pEvent->deviceInfo.eventType == 0x04 || pEvent->deviceInfo.eventType == 0x00)//只掃ScanRsp和全廣播
+        {
+          if(pEvent->deviceInfo.addr[0] != MAC_ad[5] || pEvent->deviceInfo.addr[1] != MAC_ad[4] ||
+             pEvent->deviceInfo.addr[2] != MAC_ad[3] || pEvent->deviceInfo.addr[3] != MAC_ad[2] ||
+             pEvent->deviceInfo.addr[4] != MAC_ad[1] || pEvent->deviceInfo.addr[5] != MAC_ad[0] )//避開自己Slave的廣播端
+          {
+            //如果符合smoke protocol中的smoke
+            if(pEvent->deviceInfo.pEvtData[0]  == '$'   &&  pEvent->deviceInfo.pEvtData[25] == 0x00  &&
+               pEvent->deviceInfo.pEvtData[26] == 0x00  &&  pEvent->deviceInfo.pEvtData[27] == 0x00  &&
+               pEvent->deviceInfo.pEvtData[28] == 0x00  &&  pEvent->deviceInfo.pEvtData[29] == 0x00  &&
+               pEvent->deviceInfo.pEvtData[30] == 0x00  )//代表乾淨的smole資訊
+            {
+              //比較有無重複
+              for(int a=0;a<device_number;a++)
+              {
+                check_same = strncmp(pEvent->deviceInfo.pEvtData,device[a].data,25);//只比對25即可,忽略hop者
+                if(check_same != 0)//重複馬上中斷
+                  break;
+              }
+              
+              //沒重複,儲存,並且傳送
+              if(check_same == 0)
+              {
+                memcpy(device[buffer_now_count_to].data,pEvent->deviceInfo.pEvtData,31);//拷貝
+                
+                //填上經緯度
+                device[buffer_now_count_to].data[25] = MyLight_lon_H;
+                device[buffer_now_count_to].data[26] = MyLight_lon_L;
+                device[buffer_now_count_to].data[27] = MyLight_lat_H;
+                device[buffer_now_count_to].data[28] = MyLight_lat_L;
+                device[buffer_now_count_to].data[29] = location_code;//區碼 Router 未處理
+                device[buffer_now_count_to].data[30] = MyHigh;
+                device[buffer_now_count_to].have_data = 1;
+                device[buffer_now_count_to].uart_to_slave = 1;//代表傳送完畢
+                
+                scifUartTxPutChars(device[buffer_now_count_to].data,31);//傳給Slave         
+        
+                //下一筆
+                next_buffer(&buffer_now_count_to);
+              }//其餘忽略
+            }
+            else if(pEvent->deviceInfo.pEvtData[0]  == '$'   &&  pEvent->deviceInfo.pEvtData[25] != 0x00  &&
+                    pEvent->deviceInfo.pEvtData[26] != 0x00  &&  pEvent->deviceInfo.pEvtData[27] != 0x00  &&
+                    pEvent->deviceInfo.pEvtData[28] != 0x00  &&  pEvent->deviceInfo.pEvtData[29] != 0x00  &&
+                    pEvent->deviceInfo.pEvtData[30] != 0x00     )//代表為hopping資料
+            {
+              //比較有無重複
+              for(int a=0;a<device_number;a++)
+              {
+                check_same = strncmp(pEvent->deviceInfo.pEvtData,device[a].data,31);//全比對
+                if(check_same != 0)//重複馬上中斷
+                {
+                  same_count = a;
+                  break;
+                }
+              }
+              //比較距離遠近
+              Match_distance_answer = Match_distance(pEvent->deviceInfo.pEvtData,MyLight_lon,MyLight_lat,Router_lon,Router_lat);
+              
+              
+              //我較近 沒重複 ==> 儲存值
+              if(Match_distance_answer == 1 && check_same == 0)
+              {
+                memcpy(device[buffer_now_count_to].data,pEvent->deviceInfo.pEvtData,31);//拷貝
+                
+                //填上經緯度
+                device[buffer_now_count_to].data[25] = MyLight_lon_H;
+                device[buffer_now_count_to].data[26] = MyLight_lon_L;
+                device[buffer_now_count_to].data[27] = MyLight_lat_H;
+                device[buffer_now_count_to].data[28] = MyLight_lat_L;
+                device[buffer_now_count_to].data[29] = location_code;//區碼 Router 未處理
+                device[buffer_now_count_to].data[30] = MyHigh;
+                device[buffer_now_count_to].have_data = 1;
+                device[buffer_now_count_to].uart_to_slave = 1;//代表傳送完畢
+                
+                scifUartTxPutChars(device[buffer_now_count_to].data,31);//傳給Slave         
+        
+                //下一筆
+                next_buffer(&buffer_now_count_to);
+              }
+              //我較遠 重複 ==> 刪除data
+              else if(Match_distance_answer == 0 && check_same == 1)
+              {
+                device[same_count].protection = 1;
+              }
+            }
+          }
         }
+        
+        
+        
       }
       break;
       
@@ -679,7 +955,35 @@ static void SimpleBLECentral_processRoleEvent(gapCentralRoleEvent_t *pEvent)
       {
         // discovery complete
         scanningStarted = FALSE;
+        
+        for(int a=0;a<device_number;a++)
+        {
+          if(device[a].have_data == 1)//代表有資料 開始計算資料保護時間
+            device[a].count++;
+          
+          if(device[a].protection == 1)//代表將要把刪除資訊傳過去
+          {
+            device[a].data[0] = 0xAC;
+            scifUartTxPutChars(device[a].data,31);
+            device[a].protection = 0;
+          }
+          
+          if(device[a].count > CLK && device[a].protection == 1)//可刪,又經過CLK後 ==>刪除
+          {
+            for(int b=0;b<31;b++)
+              device[a].data[b] = 0;
 
+            device[a].uart_to_slave = 0;
+            device[a].protection = 0;
+            device[a].have_data = 0;  
+            device[a].count = 0;
+          }
+        }
+        
+        
+        
+        
+        /*
         // if not filtering device discovery results based on service UUID
         if (DEFAULT_DEV_DISC_BY_SVC_UUID == FALSE)
         {
@@ -698,6 +1002,11 @@ static void SimpleBLECentral_processRoleEvent(gapCentralRoleEvent_t *pEvent)
 
         // initialize scan index to last device
         scanIdx = scanRes;
+        */
+        GAPCentralRole_StartDiscovery(DEFAULT_DISCOVERY_MODE,
+                                      DEFAULT_DISCOVERY_ACTIVE_SCAN,
+                                      DEFAULT_DISCOVERY_WHITE_LIST); 
+        
       }
       break;
 
@@ -1569,13 +1878,15 @@ static void SimpleBLECentral_passcodeCB(uint8_t *deviceAddr, uint16_t connHandle
  *
  * @return  none
  */
-void SimpleBLECentral_startDiscHandler(UArg a0)
+void SimpleBLECentral_startDiscHandler(UArg arg)//(UArg a0)
 {
-  events |= SBC_START_DISCOVERY_EVT;
-
+  //events |= SBC_START_DISCOVERY_EVT;
+  events |= arg;
   // Wake up the application thread when it waits for clock event
   Semaphore_post(sem);
 }
+
+
 
 /*********************************************************************
  * @fn      SimpleBLECentral_keyChangeHandler

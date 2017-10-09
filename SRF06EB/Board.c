@@ -61,12 +61,15 @@
 *   This is a simple gateway to the real Board.c file
 *   Based on your include path to Board.h, the corresponding Board.c will also be included
 */
-#if defined(CC2650EM_7ID)
+/*#if defined(CC2650EM_7ID)
     #include "CC2650EM_7ID/Board.c"
 #elif defined(CC2650EM_5XD)
     #include "CC2650EM_5XD/Board.c"
 #elif defined(CC2650EM_4XS)
     #include "CC2650EM_4XS/Board.c"
+*/
+#if defined(CC2650_Central)
+    #include "CC2650_Central/Board.c"
 //#else
 //    #error "Must define either 'CC2650EM_7ID', 'CC2650EM_5XD', or 'CC2650EM_4XS'. Please set include path to point to appropriate CC2650EM device"
 #endif

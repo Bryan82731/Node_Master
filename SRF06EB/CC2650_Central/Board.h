@@ -32,7 +32,7 @@
 /** ============================================================================
  *  @file       Board.h
  *
- *  @brief      CC2650EM_4XS Board Specific header file.
+ *  @brief      CC2650EM_5XD Board Specific header file.
  *              The project options should point to this file if this is the
  *              CC2650EM you are developing code for.
  *
@@ -43,8 +43,8 @@
  *
  *  ============================================================================
  */
-#ifndef __CC2650EM_4XS_H__
-#define __CC2650EM_4XS_H__
+#ifndef __CC2650EM_5XD_H__
+#define __CC2650EM_5XD_H__
 
 #ifdef __cplusplus
 extern "C" {
@@ -53,7 +53,7 @@ extern "C" {
 /** ============================================================================
  *  Symbol by generic Board.c to include the correct kit specific Board.c
  *  ==========================================================================*/
-#define CC2650EM_4XS
+#define CC2650EM_5XD
 
 /** ============================================================================
  *  Includes
@@ -61,9 +61,6 @@ extern "C" {
 #include <ti/drivers/PIN.h>
 #include <driverlib/ioc.h>
 
-  
-  
-  
 /** ============================================================================
  *  Externs
  *  ==========================================================================*/
@@ -76,48 +73,36 @@ extern PIN_Config BoardGpioInitTable[];
 /* Mapping of pins to board signals using general board aliases
  *      <board signal alias>                <pin mapping>
  */
-
-
+/* Leds */
 #define Board_LED_ON                        1 /* LEDs on CC2650 are active high */
-#define Board_LED_OFF                       
+#define Board_LED_OFF                       0
 
-#define Board_PWMPIN0                       PIN_UNASSIGNED  /* RF2.11 */
-#define Board_PWMPIN1                       PIN_UNASSIGNED  /* RF2.11 */
-#define Board_LED1                          PIN_UNASSIGNED  /* RF2.11 */
-#define Board_LED2                          PIN_UNASSIGNED  /* RF2.13 */
-#define Board_LED3                          PIN_UNASSIGNED          /* RF1.2  */
-#define Board_LED4                          PIN_UNASSIGNED  /* RF1.4  */
-#define Board_LED6                          PIN_UNASSIGNED  /* RF1.4  */
-#define Board_LED0                          PIN_UNASSIGNED  /* RF1.4  */
-#define Board_TDI                           PIN_UNASSIGNED          /* RF1.2  */
-#define Board_TDO                           PIN_UNASSIGNED          /* RF1.2  */
+#define Board_UA2_BLUE                      IOID_13
+#define Board_UA2_GREEN                     IOID_12
+#define Board_UA2_7688_P10                  IOID_11
+#define UA2_DIO8                            IOID_8
+#define UA2_DIO7                            IOID_7
 
-/* Button Board */
-#define Board_KEY_SELECT                    PIN_UNASSIGNED          /* RF1.14 *///7
-#define Board_KEY_UP                        PIN_UNASSIGNED          /* RF1.10 *///4
-#define Board_smoke_input                   PIN_UNASSIGNED        /* RF1.12 *///3
-#define Board_KEY_LEFT                      PIN_UNASSIGNED
-#define Board_KEY_RIGHT                     PIN_UNASSIGNED
-/* LCD  Board */
-#define Board_3V3_EN                        PIN_UNASSIGNED
-#define Board_LCD_MODE                      PIN_UNASSIGNED
-#define Board_LCD_RST                       PIN_UNASSIGNED
-#define Board_LCD_CSN                       PIN_UNASSIGNED
+
 /* UART Board */
-#define Board_UART_RX                       IOID_2               /* RF1.7  *///1
-#define Board_UART_TX                       IOID_1              /* RF1.9  *///2
+#define UA2_TX                              IOID_9       
+#define UA2_RX                              IOID_10          
 #define Board_UART_CTS                      PIN_UNASSIGNED
 #define Board_UART_RTS                      PIN_UNASSIGNED
+
+
 /* SPI Board */
-#define Board_SPI0_MISO                     PIN_UNASSIGNED          /* RF1.20 */
-#define Board_SPI0_MOSI                     PIN_UNASSIGNED          /* RF1.18 */
-#define Board_SPI0_CLK                      PIN_UNASSIGNED          /* RF1.16 */
-#define Board_SPI0_CSN                      PIN_UNASSIGNED  /* RF1.14 */
+#define Board_SPI0_MISO                     PIN_UNASSIGNED        
+#define Board_SPI0_MOSI                     PIN_UNASSIGNED        
+#define Board_SPI0_CLK                      PIN_UNASSIGNED         
+#define Board_SPI0_CSN                      PIN_UNASSIGNED
+#define Board_WP                            PIN_UNASSIGNED
+
+
 #define Board_SPI1_MISO                     PIN_UNASSIGNED
 #define Board_SPI1_MOSI                     PIN_UNASSIGNED
 #define Board_SPI1_CLK                      PIN_UNASSIGNED
 #define Board_SPI1_CSN                      PIN_UNASSIGNED
-
 /** ============================================================================
  *  Instance identifiers
  *  ==========================================================================*/
@@ -133,54 +118,9 @@ extern PIN_Config BoardGpioInitTable[];
 /* Generic Watchdog instance identifiers */
 #define Board_WATCHDOG              CC2650_WATCHDOG0
 
-
 /** ============================================================================
  *  Number of peripherals and their names
  *  ==========================================================================*/
-
-
-
-
-//PWM
-  
-typedef enum CC2650_GPTimerName {
-    CC2650_GPTIMER0A = 0,
-    CC2650_GPTIMER0B,
-//  CC2650_GPTIMER1A,
-//  CC2650_GPTIMER1B,
-//  CC2650_GPTIMER2A,
-//  CC2650_GPTIMER2B,
-//  CC2650_GPTIMER3A,
-//  CC2650_GPTIMER3B,
-    CC2650_GPTIMERUNITSCOUNT
-} CC2650_GPTimerName;
-
-typedef enum CC2650_GPTimers {
-    CC2650_GPTIMER0 = 0,
-//  CC2650_GPTIMER1,
-//  CC2650_GPTIMER2,
-//  CC2650_GPTIMER3,
-    CC2650_GPTIMERCOUNT
-} CC2650_GPTimers;
-
-typedef enum CC2650_PWM {
-    CC2650_PWM0 = 0,    
-    CC2650_PWM1,
-//  CC2650_PWM2,
-//  CC2650_PWM3,
-//  CC2650_PWM4,
-//  CC2650_PWM5,
-//  CC2650_PWM6,
-//  CC2650_PWM7,
-    CC2650_PWMCOUNT
-} CC2650_PWM;
-///////////////////////
-
-
-
-
-
-
 
 /*!
  *  @def    CC2650_I2CName

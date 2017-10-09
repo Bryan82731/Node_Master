@@ -69,6 +69,10 @@ extern "C"
  */
 extern void SimpleBLECentral_createTask(void);
 
+/*
+ * Task creation function for the UART_creatTask.
+ */
+extern void UART_creatTask(void);
 /*********************************************************************
 *********************************************************************/
 
