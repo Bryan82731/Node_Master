@@ -376,7 +376,6 @@ void scTaskAlertCallback(void) {
     if(rxbuf[0] == 0xAB && rxbuf[1] == 0xAB)//Slave的MAC回傳
     {
       memcpy(MAC_ad,rxbuf+2,6);
-      PIN_setOutputValue(hSbpPins, Board_UA2_GREEN, 1);
       MAC_flag = 1;//確認收到MAC 關閉事件
     }
     
@@ -700,6 +699,8 @@ static void SimpleBLECentral_taskFxn(UArg a0, UArg a1)
         osal_snv_write(0x80, sizeof(int)*20, flash);
         flash_flag = 0;
         MAC_flag = 0;
+        
+        PIN_setOutputValue(hSbpPins, Board_UA2_GREEN, 1);
       }
       else
         Util_startClock(&MAC_check);//重來
